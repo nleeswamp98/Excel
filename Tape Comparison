@@ -9,9 +9,9 @@ from openpyxl.styles import Font, PatternFill, Alignment
 INPUT_FILE          = "tapes.xlsx"       # Path to the Excel file with both tapes
 
 # Column names (case-insensitive match applied automatically)
-PROPERTY_ID_COL     = "Property ID"      # The key column used to compare tapes
+# Property Name is also the unique identifier used for comparison
+PROPERTY_NAME_COL   = "Property Name"    # Used as the comparison key AND pulled into output
 LOAN_POOL_COL       = "Loan Pool Number" # Pulled into output
-PROPERTY_NAME_COL   = "Property Name"    # Pulled into output
 ANALYST_COL         = "Analyst"          # Pulled into output
 
 # Junk rows: how many rows to skip at the top before the header row
@@ -35,6 +35,183 @@ def resolve_col(df, col_name):
     """Find a column by name case-insensitively. Raises clear error if missing."""
     target = col_name.strip().lower()
     matches = [c for c in df.columns if c == target]
+    if not matches:
+        available = [c for c in df.columns]
+        raise KeyError(
+            f"Column '{col_name}' not found. Available columns: {available}"
+        )
+    return matches[0]
+
+def load_tape(file, sheet_index, skip_rows, label):
+    """Load a tape sheet, normalize columns, and return the DataFrame."""
+    df = pd.read_excel(file, sheet_name=sheet_index, skiprows=skip_rows, dtype=str)
+    df = normalize_cols(df)
+    df = df.dropna(how="all")          # Drop fully empty rows
+    df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
+    print(f"  Loaded {label}: {len(df)} rows, {len(df.columns)} columns")
+    return df
+
+# =============================================================================
+# MAIN LOGIC
+# =============================================================================
+
+def main():
+    print("\n" + "="*60)
+    print("  TAPE COMPARISON TOOL")
+    print("="*60)
+
+    # --- Load both tapes ---
+    print("\n[1/4] Loading tapes...")
+    old_df = load_tape(INPUT_FILE, 0, OLD_TAPE_SKIP_ROWS, "OLD tape (tab 1)")
+    new_df = load_tape(INPUT_FILE, 1, NEW_TAPE_SKIP_ROWS, "NEW tape (tab 2)")
+
+    # --- Resolve column names (case-insensitive) ---
+    print("\n[2/4] Resolving columns...")
+    config_cols = [PROPERTY_NAME_COL, LOAN_POOL_COL, ANALYST_COL]
+
+    old_cols = {c: resolve_col(old_df, c) for c in config_cols}
+    new_cols = {c: resolve_col(new_df, c) for c in config_cols}
+
+    # Property Name is the comparison key — normalise to lowercase
+    old_df["__key__"] = old_df[old_cols[PROPERTY_NAME_COL]].str.lower().str.strip()
+    new_df["__key__"] = new_df[new_cols[PROPERTY_NAME_COL]].str.lower().str.strip()
+
+    old_keys = set(old_df["__key__"].dropna())
+    new_keys = set(new_df["__key__"].dropna())
+
+    # --- Set operations ---
+    print("\n[3/4] Running comparison...")
+    same_keys    = old_keys & new_keys
+    dropped_keys = old_keys - new_keys   # In old, NOT in new
+    added_keys   = new_keys - old_keys   # In new, NOT in old
+
+    # Pull display rows for drops (from old tape) and adds (from new tape)
+    drops_df = (
+        old_df[old_df["__key__"].isin(dropped_keys)]
+        [[old_cols[LOAN_POOL_COL], old_cols[PROPERTY_NAME_COL], old_cols[ANALYST_COL]]]
+        .drop_duplicates()
+        .rename(columns={
+            old_cols[LOAN_POOL_COL]:     "Loan Pool Number",
+            old_cols[PROPERTY_NAME_COL]: "Property Name",
+            old_cols[ANALYST_COL]:       "Analyst",
+        })
+        .sort_values("Property Name")
+        .reset_index(drop=True)
+    )
+
+    adds_df = (
+        new_df[new_df["__key__"].isin(added_keys)]
+        [[new_cols[LOAN_POOL_COL], new_cols[PROPERTY_NAME_COL], new_cols[ANALYST_COL]]]
+        .drop_duplicates()
+        .rename(columns={
+            new_cols[LOAN_POOL_COL]:     "Loan Pool Number",
+            new_cols[PROPERTY_NAME_COL]: "Property Name",
+            new_cols[ANALYST_COL]:       "Analyst",
+        })
+        .sort_values("Property Name")
+        .reset_index(drop=True)
+    )
+
+    # --- Terminal output ---
+    print("\n[4/4] Results")
+    print("="*60)
+    print(f"  Properties SAME (unchanged): {len(same_keys)}")
+    print(f"  Properties DROPPED (old → removed): {len(dropped_keys)}")
+    print(f"  Properties ADDED   (new → added):   {len(added_keys)}")
+
+    print("\n" + "-"*60)
+    print("  DROPS — In OLD tape, missing from NEW tape")
+    print("-"*60)
+    if drops_df.empty:
+        print("  (none)")
+    else:
+        print(drops_df.to_string(index=False))
+
+    print("\n" + "-"*60)
+    print("  ADDS — In NEW tape, not in OLD tape")
+    print("-"*60)
+    if adds_df.empty:
+        print("  (none)")
+    else:
+        print(adds_df.to_string(index=False))
+
+    print("\n" + "="*60)
+
+    # --- Optional Excel export ---
+    if EXPORT_TO_EXCEL:
+        write_excel(adds_df, drops_df)
+        print(f"  Excel output saved to: {OUTPUT_FILE}")
+        print("="*60)
+
+# =============================================================================
+# EXCEL WRITER
+# =============================================================================
+
+def write_excel(adds_df, drops_df):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Comparison Results"
+
+    header_font    = Font(name="Arial", bold=True, color="FFFFFF", size=11)
+    add_fill       = PatternFill("solid", start_color="1F7A4A")   # Dark green
+    drop_fill      = PatternFill("solid", start_color="A63B2E")   # Dark red
+    center_align   = Alignment(horizontal="center", vertical="center")
+    output_cols    = ["Loan Pool Number", "Property Name", "Analyst"]
+
+    # --- ADDS section (columns A–C) ---
+    ws.merge_cells("A1:C1")
+    ws["A1"] = "ADDS — Properties added in new tape"
+    ws["A1"].font = header_font
+    ws["A1"].fill = add_fill
+    ws["A1"].alignment = center_align
+
+    for col_idx, col_name in enumerate(output_cols, start=1):
+        cell = ws.cell(row=2, column=col_idx, value=col_name)
+        cell.font = Font(name="Arial", bold=True, size=10)
+        cell.fill = PatternFill("solid", start_color="C6EFCE")
+        cell.alignment = center_align
+
+    for r_idx, row in adds_df.iterrows():
+        for c_idx, col_name in enumerate(output_cols, start=1):
+            cell = ws.cell(row=r_idx + 3, column=c_idx, value=row[col_name])
+            cell.font = Font(name="Arial", size=10)
+
+    # --- DROPS section (columns E–G, with a gap column D) ---
+    drop_start_col = 5  # Column E
+
+    ws.merge_cells(
+        start_row=1, start_column=drop_start_col,
+        end_row=1,   end_column=drop_start_col + 2
+    )
+    header_cell = ws.cell(row=1, column=drop_start_col,
+                          value="DROPS — Properties removed from old tape")
+    header_cell.font = header_font
+    header_cell.fill = drop_fill
+    header_cell.alignment = center_align
+
+    for col_idx, col_name in enumerate(output_cols, start=drop_start_col):
+        cell = ws.cell(row=2, column=col_idx, value=col_name)
+        cell.font = Font(name="Arial", bold=True, size=10)
+        cell.fill = PatternFill("solid", start_color="FFDDC1")
+        cell.alignment = center_align
+
+    for r_idx, row in drops_df.iterrows():
+        for c_idx, col_name in enumerate(output_cols, start=drop_start_col):
+            cell = ws.cell(row=r_idx + 3, column=c_idx, value=row[col_name])
+            cell.font = Font(name="Arial", size=10)
+
+    # --- Column widths ---
+    col_widths = {1: 20, 2: 35, 3: 20, 4: 4, 5: 20, 6: 35, 7: 20}
+    for col_num, width in col_widths.items():
+        ws.column_dimensions[
+            ws.cell(row=1, column=col_num).column_letter
+        ].width = width
+
+    wb.save(OUTPUT_FILE)
+
+
+if __name__ == "__main__":
+    main()    matches = [c for c in df.columns if c == target]
     if not matches:
         available = [c for c in df.columns]
         raise KeyError(
