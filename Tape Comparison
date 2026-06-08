@@ -1,6 +1,7 @@
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.utils import get_column_letter
 
 # =============================================================================
 # CONFIGURATION — edit these variables as needed each run
@@ -51,7 +52,7 @@ def load_tape(file, sheet_index, skip_rows, label):
     df = pd.read_excel(file, sheet_name=sheet_index, skiprows=skip_rows, dtype=str)
     df = normalize_cols(df)
     df = df.dropna(how="all")          # Drop fully empty rows
-    df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
+    df = df.map(lambda x: x.strip() if isinstance(x, str) else x)
     print(f"  Loaded {label}: {len(df)} rows, {len(df.columns)} columns")
     return df
 
@@ -207,9 +208,7 @@ def write_excel(adds_df, drops_df):
     # --- Column widths ---
     col_widths = {1: 20, 2: 35, 3: 20, 4: 4, 5: 20, 6: 35, 7: 20}
     for col_num, width in col_widths.items():
-        ws.column_dimensions[
-            ws.cell(row=1, column=col_num).column_letter
-        ].width = width
+        ws.column_dimensions[get_column_letter(col_num)].width = width
 
     wb.save(OUTPUT_FILE)
 
