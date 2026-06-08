@@ -8,6 +8,10 @@ from openpyxl.styles import Font, PatternFill, Alignment
 
 INPUT_FILE          = "tapes.xlsx"       # Path to the Excel file with both tapes
 
+# Sheet identification — use the exact tab name (case-sensitive) or a 0-based index
+OLD_TAPE_SHEET      = 0                  # e.g. "January 2024" or 0 for first tab
+NEW_TAPE_SHEET      = 1                  # e.g. "February 2024" or 1 for second tab
+
 # Column names (case-insensitive match applied automatically)
 # Property Name is also the unique identifier used for comparison
 PROPERTY_NAME_COL   = "Property Name"    # Used as the comparison key AND pulled into output
@@ -62,8 +66,8 @@ def main():
 
     # --- Load both tapes ---
     print("\n[1/4] Loading tapes...")
-    old_df = load_tape(INPUT_FILE, 0, OLD_TAPE_SKIP_ROWS, "OLD tape (tab 1)")
-    new_df = load_tape(INPUT_FILE, 1, NEW_TAPE_SKIP_ROWS, "NEW tape (tab 2)")
+    old_df = load_tape(INPUT_FILE, OLD_TAPE_SHEET, OLD_TAPE_SKIP_ROWS, f"OLD tape (sheet: {OLD_TAPE_SHEET!r})")
+    new_df = load_tape(INPUT_FILE, NEW_TAPE_SHEET, NEW_TAPE_SKIP_ROWS, f"NEW tape (sheet: {NEW_TAPE_SHEET!r})")
 
     # --- Resolve column names (case-insensitive) ---
     print("\n[2/4] Resolving columns...")
