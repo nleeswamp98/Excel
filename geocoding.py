@@ -30,13 +30,13 @@ df[ZIP_COL] = (
     .str.replace(r"\.0$", "", regex=True)
 )
 
-has_zip = df[ZIP_COL] != " "
+has_zip = df[ZIP_COL] != ""
 df.loc[has_zip, ZIP_COL] = df.loc[has_zip, ZIP_COL].str.zfill(5)
 
 retry_strategy = Retry(
-    total = 4,
-    backoff_factor= 1,
-    status_forcelist= [429, 500, 502, 503, 504],
+    total=4,
+    backoff_factor=1,
+    status_forcelist=[429, 500, 502, 503, 504],
     allowed_methods=["GET"]
 )
 
@@ -67,10 +67,16 @@ def geocode_row(row):
     )
 
     if key in cache:
-        return cache
+        return cache[key]
 
     if not street or not (zip_code or (city and state)):
-        result = (pd.NA, pd.NA, pd.NA, "insufficient_address")
+        result = (
+            pd.NA,
+            pd.NA,
+            pd.NA,
+            "insufficient_address"
+        )
+
         cache[key] = result
         return result
 
@@ -91,12 +97,20 @@ def geocode_row(row):
         )
 
         response.raise_for_status()
-        matches = response.json()["result"]["addressMatches"]
+
+        response_data = response.json()
+        matches = response_data["result"]["addressMatches"]
 
         if not matches:
-            result = (pd.NA, pd.NA, pd.NA, "no_match")
+            result = (
+                pd.NA,
+                pd.NA,
+                pd.NA,
+                "no_match"
+            )
         else:
             match = matches[0]
+
             latitude = match["coordinates"]["y"]
             longitude = match["coordinates"]["x"]
             matched_address = match["matchedAddress"]
@@ -107,11 +121,17 @@ def geocode_row(row):
                 matched_address,
                 "matched"
             )
-    except (requests.RequestException, ValueError, KeyError):
-        result = (pd.NA, pd.NA, pd.NA, "request_error")
 
-        cache[key] = result
-        return result
+    except (requests.RequestException, ValueError, KeyError, TypeError):
+        result = (
+            pd.NA,
+            pd.NA,
+            pd.NA,
+            "request_error"
+        )
+
+    cache[key] = result
+    return result
 
 tqdm.pandas(desc="Geocoding addresses")
 
@@ -129,14 +149,24 @@ results.columns = [
 ]
 
 df = pd.concat(
-    [df, results], 
+    [df, results],
     axis=1
 )
 
 df.to_csv(
     OUTPUT_FILE,
-    index=False
+    index=False,
+    encoding="utf-8-sig"
 )
 
+print()
 print(df["geocode_status"].value_counts(dropna=False))
-print(f"Saved geocoded file to {OUTPUT_FILE}")
+print()
+print(df[[
+    ADDRESS_COL,
+    "latitude",
+    "longitude",
+    "geocode_status"
+]].head(10))
+print()
+print(f"Saved geocoded file to: {OUTPUT_FILE}")
