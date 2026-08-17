@@ -1,18 +1,17 @@
 import sqlite3, os, re, pdfplumber, shutil, ftfy
 from difflib import get_close_matches
 import pandas as pd
-import config
-
+import config_v2
 
 # =============================================================================
 # DATABASE SETUP
 # =============================================================================
 
 def setup_database():
-    if not os.path.exists(config.ARCHIVE_FOLDER):
-        os.makedirs(config.ARCHIVE_FOLDER)
+    if not os.path.exists(config_v2.ARCHIVE_FOLDER):
+        os.makedirs(config_v2.ARCHIVE_FOLDER)
 
-    conn = sqlite3.connect(config.DATABASE_FILE)
+    conn = sqlite3.connect(config_v2.DATABASE_FILE)
     cursor = conn.cursor()
 
     # --- DEAL LEVEL ---
@@ -75,6 +74,30 @@ def setup_database():
             factor_text TEXT,
             FOREIGN KEY (property_id) REFERENCES Properties(property_id),
             FOREIGN KEY (label_id) REFERENCES Property_Factor_Labels(label_id)
+        );
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS NCF_Analysis (
+        ncf_analysis_id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        property_id             INTEGER NOT NULL UNIQUE,
+        variance_pct            REAL NOT NULL,
+        direction               TEXT NOT NULL,
+        primary_drivers_text    TEXT,
+        intro_text              TEXT,
+        FOREIGN KEY (property_id) REFERENCES Properties(property_id),       
+        CHECK (direction IN ('below', 'above'))
+        );
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS NCF_Haircuts(
+        haircut_id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        ncf_analysis_id         INTEGER NOT NULL,
+        sequence_number         INTEGER NOT NULL,
+        haircut_text            TEXT NOT NULL,
+        FOREIGN KEY (ncf_analysis_id) REFERENCES NCF_Analysis(ncf_analysis_id),
+        UNIQUE (ncf_analysis_id, sequence_number)
         );
     """)
 
@@ -190,8 +213,8 @@ def extract_top20_loan_names(pdf):
         if not page_text:
             continue
 
-        if (config.LOAN_TABLE_KEYWORDS["HEADER_FIND_1"] in page_text and
-                config.LOAN_TABLE_KEYWORDS["HEADER_FIND_2"] in page_text):
+        if (config_v2.LOAN_TABLE_KEYWORDS["HEADER_FIND_1"] in page_text and
+                config_v2.LOAN_TABLE_KEYWORDS["HEADER_FIND_2"] in page_text):
             target_page_index = i
             break
 
@@ -207,7 +230,7 @@ def extract_top20_loan_names(pdf):
         header_index = re.search(r"Loan name", page_text, re.IGNORECASE).end()
 
         footer_match = re.search(
-            config.LOAN_TABLE_KEYWORDS["FOOTER_FIND_REGEX"],
+            config_v2.LOAN_TABLE_KEYWORDS["FOOTER_FIND_REGEX"],
             page_text, re.IGNORECASE | re.DOTALL
         )
         footer_index = footer_match.start() if footer_match else -1
@@ -223,11 +246,11 @@ def extract_top20_loan_names(pdf):
             if not cleaned_line:
                 continue
 
-            match = config.LOAN_NAME_PLAN_B_REGEX.match(cleaned_line)
+            match = config_v2.LOAN_NAME_PLAN_B_REGEX.match(cleaned_line)
             if match:
                 raw_name = match.group(1).strip()
                 if raw_name and raw_name.lower() != "loan name":
-                    clean_match = config.LOAN_NAME_CLEANER_REGEX.match(raw_name)
+                    clean_match = config_v2.LOAN_NAME_CLEANER_REGEX.match(raw_name)
                     if clean_match:
                         loan_name = clean_match.group(1).strip()
                         official_names.append(loan_name)
@@ -251,9 +274,9 @@ def extract_top10_appendix(full_text):
     end_heading = None
 
     try:
-        idx = config.PRESALE_CONTENTS.index(start_heading)
-        if idx + 1 < len(config.PRESALE_CONTENTS):
-            end_heading = config.PRESALE_CONTENTS[idx + 1]
+        idx = config_v2.PRESALE_CONTENTS.index(start_heading)
+        if idx + 1 < len(config_v2.PRESALE_CONTENTS):
+            end_heading = config_v2.PRESALE_CONTENTS[idx + 1]
     except ValueError:
         print(f"    ERROR - '{start_heading}' not in PRESALE_CONTENTS.")
         return None
@@ -282,8 +305,8 @@ def extract_top10_appendix(full_text):
 
 def extract_deal_factors_text(full_text):
     try:
-        strengths_idx = config.PRESALE_CONTENTS.index("Credit strengths")
-        challenges_idx = config.PRESALE_CONTENTS.index("Credit challenges")
+        strengths_idx = config_v2.PRESALE_CONTENTS.index("Credit strengths")
+        challenges_idx = config_v2.PRESALE_CONTENTS.index("Credit challenges")
     except ValueError as e:
         return None, None
 
@@ -300,8 +323,8 @@ def extract_deal_factors_text(full_text):
             return text_after[:end_match.start()]
         return text_after
 
-    strengths_end = config.PRESALE_CONTENTS[strengths_idx + 1]
-    challenges_end = config.PRESALE_CONTENTS[challenges_idx + 1]
+    strengths_end = config_v2.PRESALE_CONTENTS[strengths_idx + 1]
+    challenges_end = config_v2.PRESALE_CONTENTS[challenges_idx + 1]
 
     strengths_text = extract_section("Credit strengths", strengths_end)
     challenges_text = extract_section("Credit challenges", challenges_end)
@@ -348,7 +371,7 @@ def parse_deal_factors(strengths_text, challenges_text):
 
     for block, target_list in [(strengths_text or "", strength_factors),
                                 (challenges_text or "", challenge_factors)]:
-        for bullet in re.split(config.FACTOR_BULLET_REGEX, block):
+        for bullet in re.split(config_v2.FACTOR_BULLET_REGEX, block):
             if ":" in bullet:
                 try:
                     label_name, description = bullet.split(":", 1)
@@ -372,7 +395,13 @@ def parse_property_factors(loan_text):
 
     pattern = re.compile(
         r"Strengths\s*(.*?)\s*Challenges\s*(.*?)"
-        r"(?=\n\s*(?:Cash flow analysis|Moody(?:'s)? Ratings|Structured Finance|Exhibit\s+\d|[A-Z][^\n]+:)|\Z)",
+        r"(?=\n\s*(?:The\s+)?Moody[`']s\s+NCF\s+is\b|"
+        r"(?=\n\s*(?:Cash flow analysis|"
+        r"Moody(?:[`']s)? Ratings|"
+        r"Structured Finance|"
+        r"Exhibit\s+\d|"
+        r"[A-Z][^\n]+:"
+        r"|\Z)",
         re.DOTALL | re.IGNORECASE
     )
 
@@ -385,7 +414,7 @@ def parse_property_factors(loan_text):
 
     for block, target_list in [(strengths_block, strength_factors),
                                 (challenges_block, challenge_factors)]:
-        for bullet in re.split(config.FACTOR_BULLET_REGEX, block):
+        for bullet in re.split(config_v2.FACTOR_BULLET_REGEX, block):
             if ":" in bullet:
                 try:
                     label_name, description = bullet.split(":", 1)
@@ -402,6 +431,152 @@ def parse_property_factors(loan_text):
 
     return strength_factors, challenge_factors
 
+def parse_ncf_details(loan_text):
+    opening_pattern = re.compile(
+        r"(?:The\s+)?Moody[`']s\s+NCF\s+is\s+"
+        r"(\d+(?:\.\d+)?)%\s+"
+        r"(below|above)\s+the\s+lender[`']s(?:\s+NCF)?\.",
+        re.IGNORECASE
+    )
+
+    opening_match = opening_pattern.search(loan_text)
+
+    if not opening_match:
+        return None
+
+    end_heading_pattern = re.compile(
+        r"^\s*(?:"
+        + " | ".join(re.escape(heading) for heading in config_v2.NCF_END_HEADERS)
+        + r")\s*:?\s*$",
+        re.IGNORECASE | re.MULTILINE
+    )
+
+    end_match = end_heading_pattern.search(loan_text, opening_match.end())
+    end_index = end_match.start() if end_match else len(loan_text)
+
+    section_text = loan_text[opening_match.start():end_index].strip()
+
+    bullet_index = section_text.find("»")
+
+    if bullet_index != -1:
+        intro_text = section_text[:bullet_index].strip()
+        bullets_text = section_text.find("»")
+
+    else:
+        intro_text = section_text
+        bullets_text = ""
+
+    intro_text = re.sub(r"\s+", " ", intro_text).strip()
+
+    drivers_match = re.search(
+        r"Our\s+primary\s+drivers\s+are\s*:?\s*(.+?)(?:\.\s*$|$)",
+        intro_text,
+        re.IGNORECASE
+    )
+
+    primary_drivers_text = (
+        drivers_match.group(1).strip()
+        if drivers_match
+        else None
+    )
+
+    haircuts = []
+
+    if bullets_text:
+        for raw_bullet in re.split(r"»", bullets_text):
+            haircut_text = re.sub(r"\s+", " ", raw_bullet).strip()
+
+            if haircut_text:
+                haircuts.append(haircut_text)
+
+    return {
+        "variance_pct": float(opening_match.gorup(1)),
+        "direction": opening_match.group(2).lower(),
+        "primary_drivers_text": primary_drivers_text,
+        "intro_text": intro_text,
+        "haircuts": haircuts
+    }
+
+def save_ncf_data(cursor, property_id, ncf_data):
+    if not ncf_data:
+        return 0
+
+    cursor.execute(
+        "SELECT ncf_analysis_id FROM NCF_Analysis WHERE property_id = ?",
+        (property_id,)
+    )
+
+    row = cursor.fetchone()
+
+    if row:
+        ncf_analysis_id = row[0]
+
+        cursor.execute(
+            """
+            UPDATE NCF_Analysis
+            SET variance_pct = ?,
+                direction = ?,
+                primary_drivers_text = ?,
+                intro_text = ?
+            """,
+            (
+                ncf_data["variance_pct"],
+                ncf_data["direction"],
+                ncf_data["primary_drivers_text"],
+                ncf_data["intro_text"],
+                ncf_analysis_id
+            )
+        )
+
+        cursor.execute(
+            "DELETE FROM NCF_Haircuts WHERE ncf_analysis_id =?",
+            (ncf_analysis_id,)
+        )
+
+    else:
+        cursor.execute(
+            """
+            INSERT INTO NCF_Analysis (
+                property_id,
+                variance_pct,
+                direction,
+                primary_drivers_text,
+                intro_text
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                property_id,
+                ncf_data["variance_pct"],
+                ncf_data["direction"],
+                ncf_data["primary_drivers_text"],
+                ncf_data["intro_text"]
+            )
+        )
+
+        ncf_analysis_id = cursor.lastrowid
+
+    for sequence_number, haircut_text in enumerate(
+        ncf_data["haircuts"],
+        start=1
+    ):
+        cursor.execute(
+            """
+            INSERT INTO NCF_Haircuts(
+                ncf_analysis_id,
+                sequence_number,
+                haircuts_text
+            )
+            VALUES (?, ?, ?)
+            """,
+            (
+                ncf_analysis_id,
+                sequence_number,
+                haircut_text
+            )
+        )
+
+    return len(ncf_data["haircuts"])
 
 # =============================================================================
 # SPLITTING
@@ -411,7 +586,7 @@ def split_top10_appendix_by_loan(appendix_text, official_name_list):
     """STEP 4: Split appendix into loan blocks and extract names + descriptions."""
 
     collateral_blocks = re.split(
-        rf'{config.APPENDIX_SPLIT_HEADINGS["LOAN_CHUNK"]}',
+        rf'{config_v2.APPENDIX_SPLIT_HEADINGS["LOAN_CHUNK"]}',
         appendix_text,
         flags=re.IGNORECASE
     )
@@ -424,7 +599,7 @@ def split_top10_appendix_by_loan(appendix_text, official_name_list):
 
     for i, block in enumerate(collateral_blocks[1:]):
         clean_chunk_text = block.replace("\n", " ").strip()
-        match = config.APPENDIX_NAME_EXTRACTOR_REGEX.search(clean_chunk_text)
+        match = config_v2.APPENDIX_NAME_EXTRACTOR_REGEX.search(clean_chunk_text)
 
         if not match:
             #print(f"    Block {i+1}: No name match found, skipping.")
@@ -486,39 +661,85 @@ def save_deal_factors(deal_id, strengths, challenges, cursor):
 
 
 def save_loan_blocks(loan_blocks, deal_id, cursor):
-    """STEP 5: Save properties and property-level factors to database."""
 
     total_strengths = 0
     total_challenges = 0
+    total_ncf_analyses = 0
+    total_ncf_haircuts = 0
 
     for property_name, collateral_desc, loan_text in loan_blocks:
-        property_id = get_or_create_property(cursor, deal_id, property_name, collateral_desc)
+        property_id = get_or_create_property(
+            cursor,
+            deal_id,
+            property_name,
+            collateral_desc
+        )
 
         strengths, challenges = parse_property_factors(loan_text)
-
-        if not strengths and not challenges:
-            continue
-
-       # print(f"{property_name}: {len(strengths)} strengths, {len(challenges)} challenges")
-
+        ncf_data = parse_ncf_details(loan_text)
+        
         for label, desc in strengths:
             label_id = get_or_create_property_factor_label(cursor, label)
+
             cursor.execute(
-                "INSERT INTO Property_Factors (property_id, sentiment, label_id, factor_text) VALUES (?, ?, ?, ?)",
-                (property_id, "Strength", label_id, desc)
+                """
+                INSERT INTO Property_Factors (
+                    property_id,
+                    sentiment,
+                    label_id,
+                    factor_text
+                )
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    property_id,
+                    "Strength",
+                    label_id,
+                    desc
+                )
             )
 
         for label, desc in challenges:
             label_id = get_or_create_property_factor_label(cursor, label)
+
             cursor.execute(
-                "INSERT INTO Property_Factors (property_id, sentiment, label_id, factor_text) VALUES (?, ?, ?, ?)",
-                (property_id, "Challenge", label_id, desc)
+                """
+                INSERT INTO Property_Factors (
+                    property_id, 
+                    sentiment, 
+                    label_id, 
+                    factor_text
+                ) 
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    property_id, 
+                    "Challenge", 
+                    label_id, desc
+                    )
             )
+
+        haircut_count = save_ncf_data(
+            cursor,
+            property_id,
+            ncf_data
+        )
 
         total_strengths += len(strengths)
         total_challenges += len(challenges)
 
-    print(f"    Success. Total: {total_strengths} strengths, {total_challenges} challenges.")
+        if ncf_data:
+            total_ncf_analyses +=1
+            total_ncf_haircuts += haircut_count
+            ncf_status =(
+                f"{ncf_data['variance_pct']}%"
+                f"{ncf_data['direction']}",
+                f"{haircut_count} NCF haircuts"
+            )
+        else:
+            ncf_status = "no NCF detail"
+
+    print(f"    Success. Total: {total_strengths} strengths, {total_challenges} challenges. {total_ncf_haircuts} NCF haircuts.")
 
 
 def archive_file(source_path, archive_dir, pdf_file, deal_name):
@@ -530,10 +751,10 @@ def archive_file(source_path, archive_dir, pdf_file, deal_name):
         shutil.move(source_path, destination_path)
         print(f"  Archived: '{pdf_file}'")
 
-        if os.path.exists(config.INTAKE_LOG_FILE):
-            df = pd.read_csv(config.INTAKE_LOG_FILE)
+        if os.path.exists(config_v2.INTAKE_LOG_FILE):
+            df = pd.read_csv(config_v2.INTAKE_LOG_FILE)
             df.loc[df["Deal Name"] == deal_name, "Status"] = "Databased"
-            df.to_csv(config.INTAKE_LOG_FILE, index=False)
+            df.to_csv(config_v2.INTAKE_LOG_FILE, index=False)
             print(f"    Log updated: '{deal_name} marked as Databased.")
 
     except Exception as e:
@@ -548,9 +769,9 @@ def process_all_pdfs(conn):
     """Process all PDFs in the processing folder."""
     cursor = conn.cursor()
 
-    for pdf_file in os.listdir(config.PROCESSING_FOLDER):
+    for pdf_file in os.listdir(config_v2.PROCESSING_FOLDER):
         deal_type = None
-        for prefix in config.PROCESS_DEAL_TYPES:
+        for prefix in config_v2.PROCESS_DEAL_TYPES:
             if pdf_file.startswith(f"{prefix}_"):
                 deal_type = prefix
                 break
@@ -558,7 +779,7 @@ def process_all_pdfs(conn):
         if not deal_type or not pdf_file.endswith(".pdf"):
             continue
 
-        full_pdf_path = os.path.join(config.PROCESSING_FOLDER, pdf_file)
+        full_pdf_path = os.path.join(config_v2.PROCESSING_FOLDER, pdf_file)
 
         try:
             name_and_suffix = pdf_file.replace(f"{deal_type}_", "", 1)
@@ -624,7 +845,7 @@ def process_all_pdfs(conn):
             conn.commit()
             print(f"\n SUCCESS: Saved '{deal_name}' to database.")
 
-            archive_file(full_pdf_path, config.ARCHIVE_FOLDER, pdf_file, deal_name)
+            archive_file(full_pdf_path, config_v2.ARCHIVE_FOLDER, pdf_file, deal_name)
 
         except Exception as e:
             print(f"  CRITICAL ERROR: {e}")
@@ -633,7 +854,7 @@ def process_all_pdfs(conn):
 
 def main():
     setup_database()
-    conn = sqlite3.connect(config.DATABASE_FILE)
+    conn = sqlite3.connect(config_v2.DATABASE_FILE)
 
     try:
         process_all_pdfs(conn)
