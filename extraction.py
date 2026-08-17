@@ -395,13 +395,14 @@ def parse_property_factors(loan_text):
 
     pattern = re.compile(
         r"Strengths\s*(.*?)\s*Challenges\s*(.*?)"
-        r"(?=\n\s*(?:The\s+)?Moody[`']s\s+NCF\s+is\b|"
-        r"(?=\n\s*(?:Cash flow analysis|"
-        r"Moody(?:[`']s)? Ratings|"
-        r"Structured Finance|"
-        r"Exhibit\s+\d|"
-        r"[A-Z][^\n]+:"
-        r"|\Z)",
+        r"(?=\n\s*(?:"
+        r"(?:The\s+)?Moody[’']s\s+NCF\s+is\b"
+        r"|Cash flow analysis"
+        r"|Moody(?:[’']s)? Ratings"
+        r"|Structured Finance"
+        r"|Exhibit\s+\d"
+        r"|[A-Z][^\n]+:"
+        r")|\Z)",
         re.DOTALL | re.IGNORECASE
     )
 
@@ -412,14 +413,16 @@ def parse_property_factors(loan_text):
     strengths_block = match.group(1).strip()
     challenges_block = match.group(2).strip()
 
-    for block, target_list in [(strengths_block, strength_factors),
-                                (challenges_block, challenge_factors)]:
+    for block, target_list in [
+        (strengths_block, strength_factors),
+        (challenges_block, challenge_factors)
+    ]:
         for bullet in re.split(config_v2.FACTOR_BULLET_REGEX, block):
             if ":" in bullet:
                 try:
                     label_name, description = bullet.split(":", 1)
                     label_name = label_name.strip()
-                    label_name = label_name.lstrip('»Â\u00bb\u00c2 ')  # strip bullet artifacts from label
+                    label_name = label_name.lstrip('»Â\u00bb\u00c2 ')
                     description = description.strip().replace("\n", " ")
                     description = description.replace('â€"', '–').replace('â€"', '—').replace('â€™', "'").replace('Â»', '»')
                     label_name = label_name.replace('Â»', '»').lstrip('»Â\u00bb\u00c2 ')
@@ -433,9 +436,9 @@ def parse_property_factors(loan_text):
 
 def parse_ncf_details(loan_text):
     opening_pattern = re.compile(
-        r"(?:The\s+)?Moody[`']s\s+NCF\s+is\s+"
+        r"(?:The\s+)?Moody[’']s\s+NCF\s+is\s+"
         r"(\d+(?:\.\d+)?)%\s+"
-        r"(below|above)\s+the\s+lender[`']s(?:\s+NCF)?\.",
+        r"(below|above)\s+the\s+lender[’']s(?:\s+NCF)?\.",
         re.IGNORECASE
     )
 
@@ -446,30 +449,46 @@ def parse_ncf_details(loan_text):
 
     end_heading_pattern = re.compile(
         r"^\s*(?:"
-        + " | ".join(re.escape(heading) for heading in config_v2.NCF_END_HEADERS)
+        + "|".join(
+            re.escape(heading)
+            for heading in config_v2.NCF_END_HEADERS
+        )
         + r")\s*:?\s*$",
         re.IGNORECASE | re.MULTILINE
     )
 
-    end_match = end_heading_pattern.search(loan_text, opening_match.end())
-    end_index = end_match.start() if end_match else len(loan_text)
+    end_match = end_heading_pattern.search(
+        loan_text,
+        opening_match.end()
+    )
 
-    section_text = loan_text[opening_match.start():end_index].strip()
+    end_index = (
+        end_match.start()
+        if end_match
+        else len(loan_text)
+    )
+
+    section_text = loan_text[
+        opening_match.start():end_index
+    ].strip()
 
     bullet_index = section_text.find("»")
 
     if bullet_index != -1:
         intro_text = section_text[:bullet_index].strip()
-        bullets_text = section_text.find("»")
-
+        bullets_text = section_text[bullet_index:]
     else:
         intro_text = section_text
         bullets_text = ""
 
-    intro_text = re.sub(r"\s+", " ", intro_text).strip()
+    intro_text = re.sub(
+        r"\s+",
+        " ",
+        intro_text
+    ).strip()
 
     drivers_match = re.search(
-        r"Our\s+primary\s+drivers\s+are\s*:?\s*(.+?)(?:\.\s*$|$)",
+        r"Our\s+primary\s+haircut\s+drivers\s+are\s*:?\s*(.+?)(?:\.\s*$|$)",
         intro_text,
         re.IGNORECASE
     )
@@ -484,13 +503,17 @@ def parse_ncf_details(loan_text):
 
     if bullets_text:
         for raw_bullet in re.split(r"»", bullets_text):
-            haircut_text = re.sub(r"\s+", " ", raw_bullet).strip()
+            haircut_text = re.sub(
+                r"\s+",
+                " ",
+                raw_bullet
+            ).strip()
 
             if haircut_text:
                 haircuts.append(haircut_text)
 
     return {
-        "variance_pct": float(opening_match.gorup(1)),
+        "variance_pct": float(opening_match.group(1)),
         "direction": opening_match.group(2).lower(),
         "primary_drivers_text": primary_drivers_text,
         "intro_text": intro_text,
@@ -518,6 +541,7 @@ def save_ncf_data(cursor, property_id, ncf_data):
                 direction = ?,
                 primary_drivers_text = ?,
                 intro_text = ?
+            WHERE ncf_analysis_id = ?
             """,
             (
                 ncf_data["variance_pct"],
@@ -529,7 +553,7 @@ def save_ncf_data(cursor, property_id, ncf_data):
         )
 
         cursor.execute(
-            "DELETE FROM NCF_Haircuts WHERE ncf_analysis_id =?",
+            "DELETE FROM NCF_Haircuts WHERE ncf_analysis_id = ?",
             (ncf_analysis_id,)
         )
 
@@ -562,10 +586,10 @@ def save_ncf_data(cursor, property_id, ncf_data):
     ):
         cursor.execute(
             """
-            INSERT INTO NCF_Haircuts(
+            INSERT INTO NCF_Haircuts (
                 ncf_analysis_id,
                 sequence_number,
-                haircuts_text
+                haircut_text
             )
             VALUES (?, ?, ?)
             """,
@@ -733,7 +757,7 @@ def save_loan_blocks(loan_blocks, deal_id, cursor):
             total_ncf_haircuts += haircut_count
             ncf_status =(
                 f"{ncf_data['variance_pct']}%"
-                f"{ncf_data['direction']}",
+                f"{ncf_data['direction']}"
                 f"{haircut_count} NCF haircuts"
             )
         else:
