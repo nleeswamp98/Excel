@@ -63,3 +63,69 @@ def parse_deal_factor_section(section_text):
             )
 
     return factors
+
+
+def extract_deal_factors_text(full_text):
+    try:
+        strengths_idx = config_v2.PRESALE_CONTENTS.index(
+            "Credit strengths"
+        )
+
+        challenges_idx = config_v2.PRESALE_CONTENTS.index(
+            "Credit challenges"
+        )
+
+    except ValueError:
+        return None, None
+
+    def extract_section(start_heading, end_heading):
+        start_pattern = re.compile(
+            r"^\s*"
+            + re.escape(start_heading)
+            + r"\s*$",
+            re.IGNORECASE | re.MULTILINE
+        )
+
+        end_pattern = re.compile(
+            r"^\s*"
+            + re.escape(end_heading)
+            + r"\s*$",
+            re.IGNORECASE | re.MULTILINE
+        )
+
+        start_matches = list(
+            start_pattern.finditer(full_text)
+        )
+
+        if not start_matches:
+            return None
+
+        start_match = start_matches[-1]
+        text_after = full_text[start_match.end():]
+
+        end_match = end_pattern.search(text_after)
+
+        if end_match:
+            return text_after[:end_match.start()].strip()
+
+        return text_after.strip()
+
+    strengths_end = config_v2.PRESALE_CONTENTS[
+        strengths_idx + 1
+    ]
+
+    challenges_end = config_v2.PRESALE_CONTENTS[
+        challenges_idx + 1
+    ]
+
+    strengths_text = extract_section(
+        "Credit strengths",
+        strengths_end
+    )
+
+    challenges_text = extract_section(
+        "Credit challenges",
+        challenges_end
+    )
+
+    return strengths_text, challenges_text
