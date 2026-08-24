@@ -54,19 +54,16 @@ df = pd.read_excel(
     sheet_name=INPUT_SHEET
 )
 
-df = pd.read_excel(
-    INPUT_FILE, 
-    sheet_name=INPUT_SHEET
+df[PROPERTY_COL] = (
+    df[PROPERTY_COL]
+    .astype("string")
+    .str.strip()
 )
 
-df[PROPERTY_COL] = pd.to_numeric(
-    df[PROPERTY_COL],
-    errors="coerce"
-)
-
-df[TENANT_COL] = pd.to_numeric(
-    df[TENANT_COL],
-    errors="coerce"
+df[TENANT_COL] = (
+    df[TENANT_COL]
+    .astype("string")
+    .str.strip()
 )
 
 df[SF_COL] = pd.to_numeric(
@@ -194,33 +191,6 @@ mall_oc_df = occupied_df[
     & occupied_df[SIZE_BUCKET_COL].notna()
 ].copy()
 
-print("Occ Cost source column:", OCC_COST_COL)
-print("Column exists:", OCC_COST_COL in mall_oc_df.columns)
-print("available columns:")
-print(mall_oc_df.columns.tolist())
-
-mall_oc_matrix = pd.pivot_table(
-    mall_oc_df,
-    index=PROPERTY_COL,
-    columns=SIZE_BUCKET_COL,
-    values=OCC_COST_COL,
-    aggfunc="mean",
-    observed=True
-)
-
-mall_oc_matrix = mall_oc_matrix.reindex(
-    index=mall_order,
-    columns=size_labels
-)
-
-mall_oc_matrix.insert(
-    0,
-    "Total Store Count",
-    mall_store_counts
-    .set_index(PROPERTY_COL)
-    .reindex(mall_order)["Total_Store_Count"]
-)
-
 mall_average_oc = (
     mall_oc_df
     .groupby(
@@ -236,10 +206,7 @@ mall_average_oc = (
     )
 )
 
-print(mall_average_oc.columns.tolist())
-print(mall_average_oc.head())
-
-mall_oc_matrix = mall_average_rent.pivot(
+mall_oc_matrix = mall_average_oc.pivot(
     index=PROPERTY_COL,
     columns=SIZE_BUCKET_COL,
     values="Average_Occupancy_Cost_Pct"
@@ -257,6 +224,9 @@ mall_oc_matrix.insert(
     .set_index(PROPERTY_COL)
     .reindex(mall_order)["Total_Store_Count"]
 )
+
+print(mall_average_oc.columns.tolist())
+print(mall_average_oc.head())
 
 mall_bucket_counts = (
     occupied_df
@@ -315,11 +285,8 @@ mall_summary = (
     )
     .merge(
             mall_store_counts,
-            on = [
-                PROPERTY_COL,
-                SIZE_BUCKET_COL
-            ],
-            how="left"
+            on = PROPERTY_COL,
+            how = "left"
         )    
 )
 
@@ -388,7 +355,7 @@ with pd.ExcelWriter(
 
     mall_count_matrix.to_excel(
             writer,
-            sheet_name = "Mall Store Counts"
+            sheet_name = "Mall Store Count"
         )
 
     occupied_df.to_excel(
@@ -522,41 +489,11 @@ Occupied or Vacant?
 Occupied    47204
 In Place       22
 Name: count, dtype: int64
-Occ Cost source column: Gross Occ Cost %
-Column exists: True
-available columns:
-['Deal Name', 'Property Name', 'Tenant Name', 'SF', 'Rent PSF', 'Occupied or Vacant?', 'Annual In-place Base Rent Total', 'Percentage Rent Total', 'In-Place Recoveries', 'Sales Year', 'Full Year Sales?', 'Total Sales', 'Sales Yr', 'Clean Name', 'Gross Rent', 'Sales PSF', 'Occ Cost %', 'Gross Rent PSF', 'Gross Occ Cost %', 'Occ Cost PSF', 'Size Bucket']
 ['Property Name', 'Size Bucket', 'Average_Occupancy_Cost_Pct']
 Empty DataFrame
 Columns: [Property Name, Size Bucket, Average_Occupancy_Cost_Pct]
 Index: []
-Traceback (most recent call last):
-  File "C:\Users\leen5\AppData\Roaming\Python\Python313\site-packages\pandas\core\indexes\base.py", line 3641, in get_loc
-    return self._engine.get_loc(casted_key)
-           ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
-  File "pandas/_libs/index.pyx", line 168, in pandas._libs.index.IndexEngine.get_loc
-  File "pandas/_libs/index.pyx", line 197, in pandas._libs.index.IndexEngine.get_loc
-  File "pandas/_libs/hashtable_class_helper.pxi", line 7668, in pandas._libs.hashtable.PyObjectHashTable.get_item
-  File "pandas/_libs/hashtable_class_helper.pxi", line 7676, in pandas._libs.hashtable.PyObjectHashTable.get_item
-KeyError: 'Average_Occupancy_Cost_Pct'
-
-The above exception was the direct cause of the following exception:
-
-Traceback (most recent call last):
-  File "c:\Retail Sales\darrell update\mall_summary.py", line 242, in <module>
-    mall_oc_matrix = mall_average_rent.pivot(
-        index=PROPERTY_COL,
-        columns=SIZE_BUCKET_COL,
-        values="Average_Occupancy_Cost_Pct"
-    )
-  File "C:\Users\leen5\AppData\Roaming\Python\Python313\site-packages\pandas\core\frame.py", line 10986, in pivot
-    return pivot(self, index=index, columns=columns, values=values)
-  File "C:\Users\leen5\AppData\Roaming\Python\Python313\site-packages\pandas\core\reshape\pivot.py", line 905, in pivot
-    indexed = data._constructor_sliced(data[values]._values, index=multiindex)
-                                       ~~~~^^^^^^^^
-  File "C:\Users\leen5\AppData\Roaming\Python\Python313\site-packages\pandas\core\frame.py", line 4378, in __getitem__
-    indexer = self.columns.get_loc(key)
-  File "C:\Users\leen5\AppData\Roaming\Python\Python313\site-packages\pandas\core\indexes\base.py", line 3648, in get_loc
-    raise KeyError(key) from err
-KeyError: 'Average_Occupancy_Cost_Pct'
+c:\Retail Sales\darrell update\mall_summary.py:392: DeprecationWarning: Call to deprecated function copy (Use copy(obj) or cell.obj = cell.obj + other).
+  cell.font = cell.font.copy(
+Finished. Output saved to: C:\Retail Sales\darrell update\mall_rent_summary_all_years.xlsx
 PS C:\Retail Sales\darrell update> 
