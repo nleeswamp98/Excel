@@ -1,7 +1,7 @@
 from pathlib import Path
 import re
 
-BASE_DIR = Path(r"/Users/nina/Documents/Projects/presale")
+BASE_DIR = Path(r"C:\my_codes\presale")
 
 INTAKE_FOLDER = BASE_DIR / "intake"
 PROCESSING_FOLDER = BASE_DIR / "pdfs"
@@ -171,7 +171,7 @@ LOAN_NAME_CLEANER_REGEX = re.compile(
 LOAN_NAME_PLAN_B_REGEX = re.compile(
     r"""
     ^
-    ([A-Za-z0-9\s\.'&-]+?)
+    ([A-Za-z0-9\s\.'&()/-]+?)
     (?=\s{3,}|%|$)
     """,
     re.VERBOSE
